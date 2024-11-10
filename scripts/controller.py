@@ -12,6 +12,7 @@ from mavros_msgs.srv import CommandBool, CommandBoolRequest, SetMode, SetModeReq
 from cv_bridge import CvBridge
 import numpy as np
 import cv2
+from copy import deepcopy
 
 from ros_utils import dist, unwrap_pose
 
