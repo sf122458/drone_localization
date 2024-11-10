@@ -56,48 +56,16 @@ class DroneController(object):
             self.local_pos_pub.publish(pose)
             rate.sleep()
 
-        # offb_set_mode = SetModeRequest()
-        # offb_set_mode.custom_mode = "OFFBOARD"
-        # while not rospy.is_shutdown():
-        #     # print("In offboard")
-        #     last_req = rospy.Time.now()
-        #     if (self.current_state.mode != "OFFBOARD" and (rospy.Time.now() - last_req) > rospy.Duration(5.0)):
-        #         if (self.set_mode_client.call(offb_set_mode).mode_sent == True):
-        #             rospy.loginfo("OFFBOARD ENABLED")
-        #             break
-
-        #         last_req = rospy.Time.now()
-            
-
     def arm(self):
-        arm_cmd = CommandBoolRequest()
-        arm_cmd.value = True
-        # result = self.arming_client.call(arm_cmd)
-        # if result.success:
-        #     rospy.loginfo("Arming succeeded")
-        # else:
-        #     rospy.loginfo("Arming failed")
-        # last_req = rospy.Time.now()
-        # while not rospy.is_shutdown():
-        #     print("In arm")
-        #     if not self.current_state.armed and (rospy.Time.now() - last_req > rospy.Duration(5.0)):
-        #         if self.arming_client.call(arm_cmd).success == True:
-        #             rospy.loginfo("Arming succeeded")
-        #             break
-                
-        #         last_req = rospy.Time.now()
-
         while not self.current_state.armed:
             self.arming_client(True)
         print("Vehicle Armed")
             
 
-    # def disarm(self):
-    #     result = self.arming_client(True)
-    #     if result.success:
-    #         rospy.loginfo("Disarming succeeded")
-    #     else:
-    #         rospy.loginfo("Disarming failed")
+    def disarm(self):
+        while self.current_state.armed:
+            self.arming_client(False)
+        print("Vehicle Disarmed")
 
     def land(self):
         rospy.loginfo("Landing")
