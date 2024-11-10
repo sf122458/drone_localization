@@ -1,4 +1,5 @@
 import numpy as np
+import math
 from typing import List, Tuple
 from pycolmap import Rigid3d
 
@@ -7,7 +8,7 @@ from hloc.localize_sfm import QueryLocalizer, pose_from_cluster
 from hloc import extract_features, match_features, pairs_from_exhaustive
 from geometry_msgs.msg import PoseStamped
 
-# utils for quaternion calculation
+# utils for quaternion calculation and pose wrapping
 
 def quat2rot(q: Tuple):
     """
@@ -54,10 +55,32 @@ def rot2quat(R: np.ndarray):
     else:
         raise ValueError("Input must be a 2-dim or 3-dim array")
 
+def check_p(p):
+    if isinstance(p, np.ndarray):
+        p = p.squeeze()
+        assert p.shape == (3,)
+    elif isinstance(p, list) or isinstance(p, tuple):
+        assert len(p) == 3
+    else:
+        raise ValueError
+    return p
+
+def check_q(q):
+    if isinstance(q, np.ndarray):
+        q = q.squeeze()
+        assert q.shape == (4,)
+    elif isinstance(q, list) or isinstance(q, tuple):
+        assert len(q) == 4
+    else:
+        raise ValueError
+    return q
+
 def quat_mul(q1, q2):
     """
         Multiply two quaternions
     """
+    q1 = check_q(q1)
+    q2 = check_q(q2)
     x1, y1, z1, w1 = q1
     x2, y2, z2, w2 = q2
     x = x1*w2 + y1*z2 - z1*y2 + w1*x2
@@ -70,109 +93,44 @@ def inv_quat(q):
     """
         Inverse the quaternion
     """
+    q = check_q(q)
     x, y, z, w = q
     return (-x, -y, -z, w)
 
+def unwrap_pose(pose:PoseStamped):
+    p_x = pose.pose.position.x
+    p_y = pose.pose.position.y
+    p_z = pose.pose.position.z
+
+    q_x = pose.pose.orientation.x
+    q_y = pose.pose.orientation.y
+    q_z = pose.pose.orientation.z
+    q_w = pose.pose.orientation.w
+
+    return (p_x, p_y, p_z), (q_x, q_y, q_z, q_w)
+
+def wrap_pose(p, q):
+    p = check_p(p)
+    q = check_q(q)
+
+    pose = PoseStamped()
+
+    pose.pose.position.x = p[0]
+    pose.pose.position.y = p[1]
+    pose.pose.position.z = p[2]
+
+    pose.pose.orientation.x = q[0]
+    pose.pose.orientation.y = q[1]
+    pose.pose.orientation.z = q[2]
+    pose.pose.orientation.w = q[3]
+
+    return pose
+
+
+def dist(p1, p2):
+    return math.sqrt(sum([(i-j)**2 for i, j in zip(p1, p2)]))
 
 # NOTE: In the following code we use T_A2B to represent the symbol R^{B}_{A}
-
-
-# Function for determine the coordinate transformation
-
-def get_xyz_cam_in_point(rigid):
-    """
-        Get the camera central position in the coordinate system of the point cloud from the Rigid3d object.
-    """
-    assert isinstance(rigid, Rigid3d)
-    return -np.linalg.inv(quat2rot(rigid.rotation.quat)) @ rigid.translation
-
-
-# def calibrate_coord_transform(xyz_a: np.ndarray, xyz_b: np.ndarray):
-#     """
-#         Determine the coordinate transformation from xyz_a to xyz_b:
-#             B = R @ S @ A + T
-            
-#         :param xyz_a: The coordinate in the coordinate system of point cloud. Shape must be [3, N]
-#         :param xyz_b: The coordinate in the local coordinate system of drone. Shape must be [3, N]
-#         :return: R_local2point, T_local2point, S
-#     """
-#     scale = np.sqrt(np.sum(np.square(xyz_b[:, 0] - xyz_b[:, 1])) / np.sum(np.square(xyz_a[:, 0] - xyz_a[:, 1])))
-#     xyz_a = xyz_a * scale
-#     S = np.diag([scale, scale, scale])
-#     centroid_a = np.mean(xyz_a, axis=-1, keepdims=True)
-#     centroid_b = np.mean(xyz_b, axis=-1, keepdims=True)
-#     H = (xyz_a - centroid_a) @ (xyz_b - centroid_b).T
-#     U, _, V = np.linalg.svd(H)
-#     R = V.T @ U.T
-#     # if np.linalg.det(R) < 0:
-#     #   V[2, :] *= -1
-#     #   R = V.T @ U.T
-#     T = -R @ centroid_a + centroid_b
-#     return R, T, S
-
-def calibrate_xyz_transform(xyz_cam_in_point: np.ndarray, xyz_cam_in_local: np.ndarray):
-    """
-        Determine the coordinate transformation from xyz_a to xyz_b:
-            B = R @ S @ A + T
-            
-        :param xyz_a: The coordinate in the coordinate system of point cloud. Shape must be [3, N]
-        :param xyz_b: The coordinate in the local coordinate system of drone. Shape must be [3, N]
-        :return: R_local2point, T_local2point, S
-    """
-    scale = np.sqrt(np.sum(np.square(xyz_cam_in_point[:, 0] - xyz_cam_in_point[:, 1])) / np.sum(np.square(xyz_cam_in_local[:, 0] - xyz_cam_in_local[:, 1])))
-    xyz_cam_in_local = xyz_cam_in_local * scale
-    S = np.diag([scale, scale, scale])
-    centroid_a = np.mean(xyz_cam_in_local, axis=-1, keepdims=True)
-    centroid_b = np.mean(xyz_cam_in_point, axis=-1, keepdims=True)
-    H = (xyz_cam_in_local - centroid_a) @ (xyz_cam_in_point - centroid_b).T
-    U, _, V = np.linalg.svd(H)
-    R_point2local = V.T @ U.T
-    # if np.linalg.det(R) < 0:
-    #   V[2, :] *= -1
-    #   R = V.T @ U.T
-    T_point2local = -R_point2local @ centroid_a + centroid_b
-    q_point2local = rot2quat(R_point2local)
-    return R_point2local, T_point2local, S, q_point2local
-
-
-# Function for determine the quaternion of the drone pose
-# NOTE: q_point2cam == rigid.rotation.quat
-
-def calibrate_quat(q_point2cam, q_point2local, q_local2drone):
-    """
-        Calibrate the rotation of the camera pose according to the drone pose
-        return q_cam2drone
-    """
-    return quat_mul(quat_mul(inv_quat(q_point2cam), q_point2local), q_local2drone)
-
-
-def get_drone_quat(q_point2cam, q_point2local, q_cam2drone):
-    """
-        Get the quaternion of the drone pose
-        q_{drone2local} = q_{drone2cam} * q_{cam2point} * q_{point2local}
-    """
-
-    if isinstance(q_point2cam, Rigid3d):
-        q_point2cam = q_point2cam.rotation.quat
-    return quat_mul(quat_mul(inv_quat(q_point2local), q_point2cam), q_cam2drone)
-
-
-
-# def calc_quat_transform(quat_a, quat_b):
-#     """
-#         R_B = R @ R_A
-#     """
-#     # TODO
-#     if isinstance(quat_a, tuple) or isinstance(quat_a, list):
-#         return quat2rot(quat_b) @ np.linalg.inv(quat2rot(quat_a))
-#     else:
-#         raise NotImplementedError
-
-
-# def calc_orientation_2d(quat_a: np.ndarray, quat_b: np.ndarray):
-#     """
-#         R_B = R @ R_A
-#     """
 
 
 # Inputs contain the class Rigid3d: xyz_cam_in_point = -R^{-1} @ T, q_point2cam = rigid.rotation.quat
@@ -191,19 +149,14 @@ class PoseCalibrator:
             "q_drone": []
         }
 
-    """ def add_calibration(self, xyz_cam_in_point, xyz_cam_in_local, q_cam, q_drone):
-        self.calibration["xyz_cam_in_point"].append(xyz_cam_in_point)
-        self.calibration["xyz_cam_in_local"].append(xyz_cam_in_local)
-        self.calibration["q_cam"].append(q_cam)
-        self.calibration["q_drone"].append(q_drone) """
-
-    def add_calibration(self, rigid, xyz_drone, q_drone):
-        self.calibration["xyz_cam_in_point"].append(get_xyz_cam_in_point(rigid))
-        self.calibration["xyz_cam_in_local"].append(xyz_drone)
+    def add_calibration(self, rigid:Rigid3d, pose:PoseStamped):
+        self.calibration["xyz_cam_in_point"].append(self.get_xyz_cam_in_point(rigid))
+        p, q = unwrap_pose(pose)
+        self.calibration["xyz_cam_in_local"].append(p)
         self.calibration["q_cam"].append(rigid.rotation.quat)
-        self.calibration["q_drone"].append(q_drone)
+        self.calibration["q_drone"].append(q)
 
-    def callibrate_transform(self):
+    def calibrate_transform(self):
         xyz_a = np.array(self.calibration["xyz_cam_in_point"])
         xyz_b = np.array(self.calibration["xyz_cam_in_local"])
         scale = np.sqrt(np.sum(np.square(xyz_b[:, 0] - xyz_b[:, 1])) / np.sum(np.square(xyz_a[:, 0] - xyz_a[:, 1])))
@@ -230,7 +183,7 @@ class PoseCalibrator:
         self.q_cam2drone = quat_mul(quat_mul(inv_quat(q_point2cam), q_point2local), q_local2drone)
 
     def calibrate(self):
-        self.callibrate_transform()
+        self.calibrate_transform()
         self.calibrate_quat()
 
     def get_drone_pose(self, rigid):
@@ -238,51 +191,17 @@ class PoseCalibrator:
         pose = PoseStamped()
         xyz_cam_in_point = self.get_xyz_cam_in_point(rigid)
         xyz_drone = self.R_point2local @ self.S @ xyz_cam_in_point + self.T_point2local
-        q_drone = quat_mul(quat_mul(self.inv_quat(self.q_point2local), rigid.rotation.quat), self.q_cam2drone)
+        q_drone:Tuple = quat_mul(quat_mul(inv_quat(self.q_point2local), rigid.rotation.quat), self.q_cam2drone)
 
-        # return xyz_drone, q_drone
-
-        # TODO:
-        pose.pose.position.x, pose.pose.position.y, pose.pose.position.z = xyz_drone
-        pose.pose.orientation.x, pose.pose.orientation.y, pose.pose.orientation.z, pose.pose.orientation.w \
-        = q_drone
+        pose = wrap_pose(xyz_drone, q_drone)
 
         return pose
 
 
     def get_xyz_cam_in_point(self, rigid):
         assert isinstance(rigid, Rigid3d)
-        return quat_mul(-np.linalg.inv(quat2rot(rigid.rotation.quat)), rigid.translation)
+        return -np.linalg.inv(quat2rot(rigid.rotation.quat)) @ rigid.translation
 
-    def inv_quat(self, q):
-        """
-            Inverse the quaternion
-        """
-        x, y, z, w = q
-        return (-x, -y, -z, w)
-
-    def quat_mul(self, q1, q2):
-        """
-            Multiply two quaternions
-        """
-        x1, y1, z1, w1 = q1
-        x2, y2, z2, w2 = q2
-        x = x1*w2 + y1*z2 - z1*y2 + w1*x2
-        y = -x1*z2 + y1*w2 + z1*x2 + w1*y2
-        z = x1*y2 - y1*x2 + z1*w2 + w1*z2
-        w = -x1*x2 - y1*y2 - z1*z2 + w1*w2
-        return (x, y, z, w)
-
-    def rot2quat(self, R):
-        assert len(R.shape) == 2
-        tr = np.trace(R)
-        if tr > 0:
-            S = np.sqrt(tr + 1.0) * 2
-            w = 0.25 * S
-            x = (R[2, 1] - R[1, 2]) / S
-            y = (R[0, 2] - R[2, 0]) / S
-            z = (R[1, 0] - R[0, 1]) / S
-        return (x, y, z, w)
 
     def reset(self):
         self.R_point2local = None
@@ -334,3 +253,4 @@ class hlocBuilder:
         ref_ids = [self.model.find_image_with_name(n).image_id for n in self.references_registered]
         ret, log = pose_from_cluster(self.localizer, query, camera, ref_ids, self.features, self.matches)
         rigid = ret['cam_from_world']
+        return rigid

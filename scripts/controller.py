@@ -1,10 +1,7 @@
-#! /usr/bin/env python
+#! /home/ps/.conda/envs/hloc/bin/python
 
 import os
 import sys
-sys.path.append("/home/ps/.conda/envs/hloc/lib/python3.8/site-packages")
-sys.path.append("/home/ps/project/Hierarchical-Localization")
-sys.path.append("/home/ps/catkin_ws/src/hloc/scripts/ros_utils.py")
 
 import rospy
 from sensor_msgs.msg import Image, CameraInfo
@@ -15,7 +12,6 @@ from mavros_msgs.srv import CommandBool, CommandBoolRequest, SetMode, SetModeReq
 from cv_bridge import CvBridge
 import numpy as np
 import cv2
-from copy import deepcopy
 
 from ros_utils import dist, unwrap_pose
 
@@ -42,12 +38,14 @@ class DroneController(object):
         rospy.wait_for_service("mavros/set_mode")
         self.set_mode_client = rospy.ServiceProxy("mavros/set_mode", SetMode)
 
+    # callback functions
     def state_cb(self, msg):
         self.current_state = msg
 
     def local_pos_cb(self, msg):
         self.local_pos = msg
 
+    # basic cmd
     def init_stream(self, rate, n=100):
         for _ in range(n):
             if(rospy.is_shutdown()):
