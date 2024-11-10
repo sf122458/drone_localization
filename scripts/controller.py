@@ -1,16 +1,23 @@
 #! /usr/bin/env python
 
+import os
+import sys
+sys.path.append("/home/ps/.conda/envs/hloc/lib/python3.8/site-packages")
+sys.path.append("/home/ps/project/Hierarchical-Localization")
+sys.path.append("/home/ps/catkin_ws/src/hloc/scripts/ros_utils.py")
+
 import rospy
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from mavros_msgs.msg import State
 from mavros_msgs.srv import CommandBool, CommandBoolRequest, SetMode, SetModeRequest
-from pose_utils import PoseCalibrator, hlocBuilder
+# from pose_utils import PoseCalibrator, hlocBuilder
 from cv_bridge import CvBridge
 import numpy as np
 import cv2
+from copy import deepcopy
 
-from utils import dist, unwrap_pose
+from ros_utils import dist, unwrap_pose
 
 class DroneController(object):
     def __init__(self, rate=20):
@@ -43,34 +50,71 @@ class DroneController(object):
 
     def init_stream(self, rate, n=100):
         for _ in range(n):
+            if(rospy.is_shutdown()):
+                break
             pose = PoseStamped()
             self.local_pos_pub.publish(pose)
             rate.sleep()
 
-    def arm(self):
-        result = self.arming_client(True)
-        if result.success:
-            rospy.loginfo("Arming succeeded")
-        else:
-            rospy.loginfo("Arming failed")
+        # offb_set_mode = SetModeRequest()
+        # offb_set_mode.custom_mode = "OFFBOARD"
+        # while not rospy.is_shutdown():
+        #     # print("In offboard")
+        #     last_req = rospy.Time.now()
+        #     if (self.current_state.mode != "OFFBOARD" and (rospy.Time.now() - last_req) > rospy.Duration(5.0)):
+        #         if (self.set_mode_client.call(offb_set_mode).mode_sent == True):
+        #             rospy.loginfo("OFFBOARD ENABLED")
+        #             break
 
-    def disarm(self):
-        result = self.arming_client(True)
-        if result.success:
-            rospy.loginfo("Disarming succeeded")
-        else:
-            rospy.loginfo("Disarming failed")
+        #         last_req = rospy.Time.now()
+            
+
+    def arm(self):
+        arm_cmd = CommandBoolRequest()
+        arm_cmd.value = True
+        # result = self.arming_client.call(arm_cmd)
+        # if result.success:
+        #     rospy.loginfo("Arming succeeded")
+        # else:
+        #     rospy.loginfo("Arming failed")
+        # last_req = rospy.Time.now()
+        # while not rospy.is_shutdown():
+        #     print("In arm")
+        #     if not self.current_state.armed and (rospy.Time.now() - last_req > rospy.Duration(5.0)):
+        #         if self.arming_client.call(arm_cmd).success == True:
+        #             rospy.loginfo("Arming succeeded")
+        #             break
+                
+        #         last_req = rospy.Time.now()
+
+        while not self.current_state.armed:
+            self.arming_client(True)
+        print("Vehicle Armed")
+            
+
+    # def disarm(self):
+    #     result = self.arming_client(True)
+    #     if result.success:
+    #         rospy.loginfo("Disarming succeeded")
+    #     else:
+    #         rospy.loginfo("Disarming failed")
 
     def land(self):
         rospy.loginfo("Landing")
-        self.set_mode_client("AUTO.LAND")
+        self.set_mode("AUTO.LAND")
 
 
     def set_mode(self, mode):
-        pass
+        offb_set_mode = SetModeRequest()
+        offb_set_mode.custom_mode = mode
+        result = self.set_mode_client.call(offb_set_mode)
+        if result.mode_sent:
+            rospy.loginfo("Setting mode to %s successful", mode)
+        else:
+            rospy.loginfo("Setting mode to %s unsuccessful", mode)
 
     def set_target_pos(self, x=None, y=None, z=None):
-        self.target_pos = self.local_pos
+        self.target_pos = deepcopy(self.local_pos)
         if x != None:
             self.target_pos.pose.position.x = x
         if y != None:
@@ -93,12 +137,12 @@ class DroneController(object):
 
         self.arm()
 
-        #NOTE: enter OFFBOARD mode
+        # NOTE: enter OFFBOARD mode
         self.init_stream(self.rate)
-
+        
         rospy.loginfo("Taking off")
 
-        self.set_target_pos_and_exec(z=5)
+        self.set_target_pos_and_exec(z=z)
 
         while dist(unwrap_pose(self.local_pos)[0], unwrap_pose(self.target_pos)[0]) > 0.1:
             if self.current_state.mode != "OFFBOARD":
@@ -112,12 +156,7 @@ if __name__ == "__main__":
 
     drone = DroneController()
 
-    try:
-        drone.takeoff(2)
-        drone.land()
-    except KeyboardInterrupt:
-        print("Keyboard Interrupt")
-        try:
-            drone.land()
-        except:
-            print("Drone landed.")
+    drone.takeoff(5)
+    drone.land()
+
+    rospy.spin()
