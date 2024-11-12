@@ -5,5 +5,5 @@
     </include>
 
     <!-- Our node to control the drone -->
-    <node pkg="hloc" type="controller.py" name="offb_node_py" required="true" output="screen" />
+    <node pkg="uav_positioning" type="controller.py" name="offb_node_py" required="true" output="screen" />
 </launch>
