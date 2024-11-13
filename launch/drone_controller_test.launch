@@ -5,5 +5,8 @@
     </include>
 
     <!-- Our node to control the drone -->
-    <node pkg="uav_positioning" type="controller.py" name="offb_node_py" required="true" output="screen" />
+    <!-- <node pkg="uav_positioning" type="controller.py" name="offb_node_py" required="true" output="screen" /> -->
+    <!-- <node pkg="uav_positioning" type="topic_control.py" name="offb_node_py" required="true" output="screen" /> -->
+    <node pkg="uav_positioning" type="keyboard_control.py" name="offb_node_py" required="true" output="screen" />
+    <!-- <node pkg="uav_positioning" type="key_control.py" name="offb_node_py" required="true" output="screen" /> -->
 </launch>

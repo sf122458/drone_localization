@@ -1,3 +1,4 @@
 # test/
 src/
 scripts/__pycache__/
+scripts/key_control.py

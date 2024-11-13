@@ -16,7 +16,7 @@ from copy import deepcopy
 
 from ros_utils import dist, unwrap_pose
 
-class DroneController(object):
+class BasicDroneController(object):
     def __init__(self, rate=20):
 
         self.rate = rospy.Rate(rate)
@@ -24,12 +24,15 @@ class DroneController(object):
         self.current_state = State()
         self.local_pos = PoseStamped()
         self.target_pos = PoseStamped()
+        self.local_vel = TwistStamped()
 
         # 订阅无人机位置与姿态xyz, q
-        self.local_pos_sub = rospy.Subscriber("mavros/local_position/pose", PoseStamped, self.local_pos_cb)
+        rospy.Subscriber("mavros/local_position/pose", PoseStamped, self.local_pos_cb)
 
         # 发布无人机位置与姿态xyz, q
         self.local_pos_pub = rospy.Publisher("mavros/setpoint_position/local", PoseStamped, queue_size=10)
+
+        rospy.Subscriber("mavros/setpoint_velocity/cmd_vel", TwistStamped, self.vel_cb)
 
         self.state_sub = rospy.Subscriber("mavros/state", State, self.state_cb)
 
@@ -45,6 +48,9 @@ class DroneController(object):
 
     def local_pos_cb(self, msg):
         self.local_pos = msg
+
+    def vel_cb(self, msg):
+        self.local_vel = msg
 
     # basic cmd
     def init_stream(self, rate, n=100):
@@ -81,21 +87,14 @@ class DroneController(object):
             rospy.loginfo("Setting mode to %s unsuccessful", mode)
 
     def set_target_pos(self, x=None, y=None, z=None):
-        self.target_pos = deepcopy(self.local_pos)
-        if x != None:
-            self.target_pos.pose.position.x = x
-        if y != None:
-            self.target_pos.pose.position.y = y
-        if z != None:
-            self.target_pos.pose.position.z = z
-
-    def publish_target_pos(self):
-        self.local_pos_pub.publish(self.target_pos)
+        self.target_pos.pose.position.x = x if x is not None else self.target_pos.pose.position.x
+        self.target_pos.pose.position.y = y if y is not None else self.target_pos.pose.position.y
+        self.target_pos.pose.position.z = z if z is not None else self.target_pos.pose.position.z
 
     def set_target_pos_and_exec(self, x=None, y=None, z=None):
         self.set_target_pos(x, y, z)
-        self.publish_target_pos()
-        
+        self.local_pos_pub.publish(self.target_pos)
+
 
     def takeoff(self, z=5):
         rospy.loginfo("Connecting to Autopilot")
@@ -115,13 +114,18 @@ class DroneController(object):
             if self.current_state.mode != "OFFBOARD":
                 self.set_mode("OFFBOARD")
 
-            self.publish_target_pos()
+            self.local_pos_pub.publish(self.target_pos)
             self.rate.sleep()
+
+
+    def main(self):
+        raise NotImplementedError
+            
 
 if __name__ == "__main__":
     rospy.init_node("mavros_drone_test")
 
-    drone = DroneController()
+    drone = BasicDroneController()
 
     drone.takeoff(5)
     drone.land()
